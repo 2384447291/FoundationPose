@@ -61,6 +61,15 @@ class YcbineoatReader:
     self.zfar = zfar
     self.color_files = sorted(glob.glob(f"{self.video_dir}/rgb/*.png"))
     self.K = np.loadtxt(f'{video_dir}/cam_K.txt').reshape(3,3)
+
+    cam_params_file = f'{video_dir}/camera_params.json'
+    if os.path.exists(cam_params_file):
+        with open(cam_params_file, 'r') as f:
+            cam_params = json.load(f)
+            self.depth_scale = cam_params.get('depth_scale', 0.001)
+    else:
+        self.depth_scale = 0.001
+
     self.id_strs = []
     for color_file in self.color_files:
       id_str = os.path.basename(color_file).replace('.png','')
@@ -120,7 +129,7 @@ class YcbineoatReader:
     return mask
 
   def get_depth(self,i):
-    depth = cv2.imread(self.color_files[i].replace('rgb','depth'),-1)/1e3
+    depth = cv2.imread(self.color_files[i].replace('rgb','depth'),-1) * self.depth_scale
     depth = cv2.resize(depth, (self.W,self.H), interpolation=cv2.INTER_NEAREST)
     depth[(depth<0.001) | (depth>=self.zfar)] = 0
     return depth
