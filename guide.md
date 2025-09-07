@@ -141,9 +141,11 @@ cudatoolkit                   11.8.0      h6a678d5_0  anaconda/pkgs/main
 export PATH=$CONDA_PREFIX/bin:$PATH
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 
-conda install -c nvidia cuda-toolkit=11.8 相当于 cudatoolkit-dev + cudatoolkit
+conda install -c nvidia cuda-toolkit=12.8 相当于 cudatoolkit-dev + cudatoolkit
 conda install -c nvidia cudatoolkit-dev
 conda install -c nvidia cudnn=8.9.6
+
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 conda install -c conda-forge gxx_linux-64=10.3.0 cxx-compiler=1.4.0 -y
 
