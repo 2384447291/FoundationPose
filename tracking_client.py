@@ -202,20 +202,6 @@ def run_tracking_session(pubsub, rs_cam, object_prompt, object_name):
     """Run a complete tracking session for the given object."""
     global tracking_active
     
-    # 清除所有相关topic中的旧数据
-    logging.info("Clearing all topic buffers before starting new tracking session...")
-    topics_to_clear = [POSE_TOPIC, REQUEST_TOPIC, MASK_TOPIC, CONTROL_TOPIC]
-    
-    for topic_name in topics_to_clear:
-        try:
-            topic = pubsub.get_topic(topic_name)
-            if topic and hasattr(topic.storage, 'clear'):
-                topic.storage.clear()
-                logging.info(f"Successfully cleared {topic_name} buffer")
-        except Exception as e:
-            logging.warning(f"Failed to clear {topic_name} buffer: {e}")
-    
-    logging.info("All topic buffers cleared")
     
     code_dir = os.path.dirname(os.path.realpath(__file__))
     mesh_file = os.path.join(code_dir, f'Object_data/{object_name}/{object_name}.obj')
@@ -317,13 +303,46 @@ def run_tracking_session(pubsub, rs_cam, object_prompt, object_name):
             cv2.destroyWindow('Real-time Tracking')
             logging.info("Closed tracking visualization window")
         
-        # 停止时发布50次最终位姿到广播buffer
+        # 停止时发布20次最终位姿到广播buffer
         logging.info("Tracking stopped. Publishing final poses to buffer for averaging...")
         with pose_lock:
             final_pose = latest_pose.copy() if latest_pose is not None else None
         
         if final_pose is not None:
-            for i in range(50):
+            # 打印停止时的位姿信息
+            print("\n" + "="*80)
+            print("TRACKING STOPPED - PUBLISHING FINAL POSES FOR AVERAGING")
+            print("="*80)
+            
+            # 提取位置和旋转信息用于显示
+            translation = final_pose[:3, 3]
+            rotation_matrix = final_pose[:3, :3]
+            
+            # 将旋转矩阵转换为欧拉角 (简单的XYZ欧拉角)
+            def rotation_matrix_to_euler_angles(R):
+                sy = np.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+                singular = sy < 1e-6
+                if not singular:
+                    x = np.arctan2(R[2,1], R[2,2])
+                    y = np.arctan2(-R[2,0], sy)
+                    z = np.arctan2(R[1,0], R[0,0])
+                else:
+                    x = np.arctan2(-R[1,2], R[1,1])
+                    y = np.arctan2(-R[2,0], sy)
+                    z = 0
+                return np.array([x, y, z]) * 180.0 / np.pi
+            
+            euler_angles = rotation_matrix_to_euler_angles(rotation_matrix)
+            
+            print(f"Final Pose Translation: [{translation[0]:8.4f}, {translation[1]:8.4f}, {translation[2]:8.4f}]")
+            print(f"Final Pose Rotation(deg): [{euler_angles[0]:7.2f}, {euler_angles[1]:7.2f}, {euler_angles[2]:7.2f}]")
+            print(f"Object: {object_name}")
+            print("\nFinal 4x4 Transformation Matrix:")
+            print(final_pose)
+            print("\nPublishing this pose 20 times to buffer...")
+            
+            # 发布20次位姿
+            for i in range(20):
                 pose_data = {
                     'pose_matrix': final_pose.astype(np.float32),
                     'timestamp': time.time(),
@@ -333,9 +352,18 @@ def run_tracking_session(pubsub, rs_cam, object_prompt, object_name):
                 try:
                     pubsub.publish(POSE_TOPIC, pose_data)
                     time.sleep(0.001)  # 小延迟确保数据写入
+                    
+                    # 每5个样本打印一次进度
+                    if (i + 1) % 5 == 0:
+                        print(f"Published pose sample {i+1}/20")
+                        
                 except Exception as e:
                     logging.error(f"Failed to publish final pose {i}: {e}")
-            logging.info("Published 50 final poses to buffer for controller averaging.")
+            
+            print("="*80)
+            print("COMPLETED: Published 20 final poses to buffer for controller averaging.")
+            print("="*80 + "\n")
+            logging.info("Published 20 final poses to buffer for controller averaging.")
         
         logging.info(f"Tracking session for {object_name} completed.")
         return True
@@ -413,7 +441,7 @@ def main():
                 'frame_idx': np.int32(0),
                 'object_name': encode_text_prompt('default_object')
             },
-            'buffer_size': 50,
+            'buffer_size': 20,
             'mode': 'broadcast'  # 位姿数据使用广播模式
         }
     }

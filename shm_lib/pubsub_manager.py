@@ -111,6 +111,7 @@ class PubSubTopic:
                 return self.storage.get()
             else:
                 raise Empty()
+    
 
 
 class PubSubManager:
@@ -343,6 +344,7 @@ class PubSubManager:
     def _get_topic(self, topic_name: str) -> Optional[PubSubTopic]:
         """Get an existing topic."""
         return self.topics.get(topic_name)
+    
     
     def _register_publisher(self):
         """Register a publisher."""
@@ -734,6 +736,7 @@ class PubSubManager:
         
         # Get latest data
         return self.get_latest(topic_name, block=False)
+    
     
     def run_data_listener(self, topic_name: str, data_handler: Callable, 
                          check_interval: float = 0.001):
