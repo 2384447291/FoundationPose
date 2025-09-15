@@ -39,6 +39,7 @@ REQUEST_TOPIC = "segmentation_requests"
 MASK_TOPIC = "segmentation_masks"
 CONTROL_TOPIC = "tracking_control"      # 新增：接收开启/停止命令
 POSE_TOPIC = "tracking_poses"           # 新增：发送位姿数据
+POSE_IMAGE_TOPIC = "tracking_pose_image" # 新增：按需发送当前可视化帧
 
 # Global variables for mask receiving
 received_mask = None
@@ -52,6 +53,8 @@ control_received_event = threading.Event()
 _PUBSUB_REF = None
 latest_pose = None
 pose_lock = threading.Lock()
+latest_vis_rgb = None
+vis_lock = threading.Lock()
 
 
 def handle_segmentation_mask(data):
@@ -72,6 +75,7 @@ def handle_tracking_control(data):
     global tracking_active, current_object_prompt, current_object_name, control_received_event
     
     command = decode_text_prompt(data.get('command', ''))
+    logging.info(f"Received tracking control command: {command}")
     
     if command == 'start':
         # 从外部程序接收开启命令和对象信息
@@ -113,6 +117,26 @@ def handle_tracking_control(data):
                 logging.error(f"Failed to publish on-demand pose: {e}")
         else:
             logging.debug("No pose available to respond to get_pose")
+    
+    elif command == 'request_pose_image':
+        # 按需返回当前可视化图像（单次回应）
+        img_to_send = None
+        with vis_lock:
+            if latest_vis_rgb is not None:
+                img_to_send = latest_vis_rgb.copy()
+        if img_to_send is not None:
+            try:
+                PubSubManager_instance = pubsub_global_ref()
+                if PubSubManager_instance is not None:
+                    PubSubManager_instance.publish(POSE_IMAGE_TOPIC, {
+                        'image': img_to_send,
+                        'timestamp': time.time()
+                    })
+                    logging.info("Published on-demand tracking visualization image")
+            except Exception as e:
+                logging.error(f"Failed to publish on-demand pose image: {e}")
+        else:
+            logging.debug("No visualization image available to respond to request_pose_image")
         
     else:
         logging.warning(f"Unknown control command: {command}")
@@ -200,7 +224,7 @@ def get_validated_segmentation_mask(pubsub, rs_cam, initial_color, object_prompt
 
 def run_tracking_session(pubsub, rs_cam, object_prompt, object_name):
     """Run a complete tracking session for the given object."""
-    global tracking_active
+    global tracking_active, latest_vis_rgb
     
     
     code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -283,6 +307,9 @@ def run_tracking_session(pubsub, rs_cam, object_prompt, object_name):
                 center_pose = pose @ np.linalg.inv(to_origin_transform)
                 vis = draw_posed_3d_box(cam_K, img=color, ob_in_cam=center_pose, bbox=bbox)
                 vis = draw_xyz_axis(color, ob_in_cam=center_pose, scale=0.1, K=cam_K, thickness=3, transparency=0, is_input_rgb=True)
+                # 缓存当前RGB可视化帧，供按需发布
+                with vis_lock:
+                    latest_vis_rgb = vis.copy()
                 cv2.imshow('Real-time Tracking', vis[...,::-1])
 
             if debug >= 2:
@@ -443,6 +470,14 @@ def main():
             },
             'buffer_size': 20,
             'mode': 'broadcast'  # 位姿数据使用广播模式
+        },
+        POSE_IMAGE_TOPIC: {
+            'examples': {
+                'image': np.zeros((480, 640, 3), dtype=np.uint8),
+                'timestamp': np.float64(0.0)
+            },
+            'buffer_size': 5,
+            'mode': 'consumer'  # 位姿图像使用消费者模式
         }
     }
     
